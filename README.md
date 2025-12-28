@@ -29,31 +29,31 @@ cd zawinski
 zig build -Doptimize=ReleaseFast
 ```
 
-The binary is placed in `zig-out/bin/zawinski`.
+The binary is placed in `zig-out/bin/jwz`.
 
 ## Quick Start
 
 ```sh
 # Initialize a store in .zawinski/
-zawinski init
+jwz init
 
 # Create a topic
-zawinski topic new tasks -d "Work queue for agents"
+jwz topic new tasks -d "Work queue for agents"
 
 # Post a message (returns message ID)
-zawinski post tasks -m "Analyze data.csv and report anomalies"
+jwz post tasks -m "Analyze data.csv and report anomalies"
 
 # Read messages in a topic
-zawinski read tasks
+jwz read tasks
 
 # Reply to a message (use prefix of message ID)
-zawinski reply 01HQ -m "Analysis complete. Found 3 anomalies."
+jwz reply 01HQ -m "Analysis complete. Found 3 anomalies."
 
 # View full thread
-zawinski thread 01HQ
+jwz thread 01HQ
 
 # Search across all messages
-zawinski search "anomalies"
+jwz search "anomalies"
 ```
 
 ## Command Reference
@@ -86,10 +86,10 @@ Message IDs are ULIDs (26 characters). You can reference messages using any uniq
 
 ```sh
 # Full ID
-zawinski show 01HQ5N3XYZABCDEF12345678
+jwz show 01HQ5N3XYZABCDEF12345678
 
 # Or just enough to be unique
-zawinski show 01HQ
+jwz show 01HQ
 ```
 
 If a prefix matches multiple messages, you will get an error asking for more characters.
@@ -138,7 +138,7 @@ lock
 
 ## Store Discovery
 
-zawinski searches for `.zawinski/` starting from the current directory and walking up the tree (like git finds `.git/`). This means you can run commands from any subdirectory of your project.
+`jwz` searches for `.zawinski/` starting from the current directory and walking up the tree (like git finds `.git/`). This means you can run commands from any subdirectory of your project.
 
 ## Name
 

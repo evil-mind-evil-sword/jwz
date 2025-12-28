@@ -48,21 +48,21 @@ main() {
         exit 1
     fi
 
-    BINARY_NAME="zawinski-$PLATFORM"
+    BINARY_NAME="jwz-$PLATFORM"
     DOWNLOAD_URL="https://github.com/$REPO/releases/download/$VERSION/$BINARY_NAME"
 
-    echo "Installing zawinski $VERSION for $PLATFORM..."
+    echo "Installing jwz $VERSION for $PLATFORM..."
 
     # Create install directory
     mkdir -p "$INSTALL_DIR"
 
     # Download binary
     echo "Downloading $DOWNLOAD_URL..."
-    curl -fsSL "$DOWNLOAD_URL" -o "$INSTALL_DIR/zawinski"
-    chmod +x "$INSTALL_DIR/zawinski"
+    curl -fsSL "$DOWNLOAD_URL" -o "$INSTALL_DIR/jwz"
+    chmod +x "$INSTALL_DIR/jwz"
 
     echo ""
-    echo "zawinski installed to $INSTALL_DIR/zawinski"
+    echo "jwz installed to $INSTALL_DIR/jwz"
 
     # Check if in PATH
     if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
@@ -73,9 +73,9 @@ main() {
 
     echo ""
     echo "Get started:"
-    echo "  zawinski init"
-    echo "  zawinski topic new general -d 'General discussion'"
-    echo "  zawinski post general -m 'Hello, agents!'"
+    echo "  jwz init"
+    echo "  jwz topic new general -d 'General discussion'"
+    echo "  jwz post general -m 'Hello, agents!'"
 }
 
 main
