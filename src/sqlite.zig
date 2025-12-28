@@ -11,7 +11,8 @@ pub const Error = error{
     SqliteBusy,
 };
 
-pub fn open(path: []const u8) !*c.sqlite3 {
+/// Opens a database. Path must be null-terminated.
+pub fn open(path: [:0]const u8) !*c.sqlite3 {
     var db: ?*c.sqlite3 = null;
     const rc = c.sqlite3_open_v2(path.ptr, &db, c.SQLITE_OPEN_READWRITE | c.SQLITE_OPEN_CREATE, null);
     if (rc != c.SQLITE_OK) {
@@ -27,7 +28,8 @@ pub fn close(db: *c.sqlite3) void {
     _ = c.sqlite3_close_v2(db);
 }
 
-pub fn exec(db: *c.sqlite3, sql: []const u8) !void {
+/// Executes SQL. SQL must be null-terminated.
+pub fn exec(db: *c.sqlite3, sql: [:0]const u8) !void {
     const rc = c.sqlite3_exec(db, sql.ptr, null, null, null);
     if (rc != c.SQLITE_OK) {
         if (isBusyCode(rc)) return Error.SqliteBusy;
@@ -58,6 +60,9 @@ pub fn finalize(stmt: *c.sqlite3_stmt) void {
 }
 
 pub fn bindText(stmt: *c.sqlite3_stmt, idx: c_int, text: []const u8) !void {
+    // SAFETY: We use SQLITE_STATIC (null destructor) because all callers
+    // execute step() and finalize() within the same scope where the text
+    // buffer is valid. The buffer lifetime is guaranteed by the caller.
     const rc = c.sqlite3_bind_text(stmt, idx, text.ptr, @as(c_int, @intCast(text.len)), null);
     if (rc != c.SQLITE_OK) return Error.SqliteError;
 }
@@ -94,6 +99,10 @@ pub fn columnInt(stmt: *c.sqlite3_stmt, idx: c_int) i32 {
 
 pub fn lastInsertRowId(db: *c.sqlite3) i64 {
     return c.sqlite3_last_insert_rowid(db);
+}
+
+pub fn changes(db: *c.sqlite3) i32 {
+    return c.sqlite3_changes(db);
 }
 
 pub fn errmsg(db: *c.sqlite3) []const u8 {

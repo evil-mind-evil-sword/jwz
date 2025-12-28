@@ -4,6 +4,7 @@ const ids = @import("ids.zig");
 
 pub const StoreError = error{
     StoreNotFound,
+    StoreAlreadyExists,
     TopicNotFound,
     TopicExists,
     MessageNotFound,
@@ -85,7 +86,7 @@ pub const Store = struct {
     pub fn init(allocator: std.mem.Allocator, dir: []const u8) !void {
         // Create .zawinski directory
         std.fs.makeDirAbsolute(dir) catch |err| switch (err) {
-            error.PathAlreadyExists => return error.StoreNotFound, // Already exists
+            error.PathAlreadyExists => return error.StoreAlreadyExists,
             else => return err,
         };
 
@@ -110,7 +111,11 @@ pub const Store = struct {
         const jsonl_path = try std.fs.path.join(allocator, &.{ store_dir, "messages.jsonl" });
         errdefer allocator.free(jsonl_path);
 
-        const db = try sqlite.open(db_path);
+        // Allocate null-terminated path for SQLite
+        const db_path_z = try allocator.dupeZ(u8, db_path);
+        defer allocator.free(db_path_z);
+
+        const db = try sqlite.open(db_path_z);
         errdefer sqlite.close(db);
 
         var self = Store{
@@ -168,9 +173,10 @@ pub const Store = struct {
     // ========== Topic Operations ==========
 
     pub fn createTopic(self: *Store, name: []const u8, description: []const u8) ![]u8 {
-        // Validate input
+        // Validate and normalize input
         const trimmed_name = std.mem.trim(u8, name, " \t\r\n");
         if (trimmed_name.len == 0) return StoreError.EmptyTopicName;
+        const trimmed_desc = std.mem.trim(u8, description, " \t\r\n");
 
         const now_ms = @as(i64, @intCast(std.time.milliTimestamp()));
         const id = try self.ulid.nextNow(self.allocator);
@@ -179,12 +185,12 @@ pub const Store = struct {
         try self.beginImmediate();
         errdefer sqlite.exec(self.db, "ROLLBACK;") catch {};
 
-        // Insert into DB
+        // Insert into DB (use trimmed values for consistency)
         const stmt = try sqlite.prepare(self.db, "INSERT INTO topics (id, name, description, created_at) VALUES (?, ?, ?, ?);");
         defer sqlite.finalize(stmt);
         try sqlite.bindText(stmt, 1, id);
-        try sqlite.bindText(stmt, 2, name);
-        try sqlite.bindText(stmt, 3, description);
+        try sqlite.bindText(stmt, 2, trimmed_name);
+        try sqlite.bindText(stmt, 3, trimmed_desc);
         try sqlite.bindInt64(stmt, 4, now_ms);
         _ = sqlite.step(stmt) catch |err| {
             if (err == sqlite.Error.SqliteError or err == sqlite.Error.SqliteStepError) {
@@ -194,7 +200,7 @@ pub const Store = struct {
         };
 
         // Append to JSONL
-        try self.appendTopicJsonl(id, name, description, now_ms);
+        try self.appendTopicJsonl(id, trimmed_name, trimmed_desc, now_ms);
 
         try self.commit();
         return id;
@@ -651,17 +657,20 @@ pub const Store = struct {
             return;
         }
 
-        try self.importFromOffset(stored_offset);
+        try self.importFromOffset(stored_offset, false);
     }
 
     fn fullReimport(self: *Store) !void {
-        try sqlite.exec(self.db, "DELETE FROM messages;");
-        try sqlite.exec(self.db, "DELETE FROM topics;");
-        try sqlite.exec(self.db, "DELETE FROM messages_fts;");
-        try self.importFromOffset(0);
+        try self.importFromOffset(0, true);
     }
 
-    fn importFromOffset(self: *Store, offset: u64) !void {
+    fn importFromOffset(self: *Store, offset: u64, clear_first: bool) !void {
+        // Acquire lock before reading to prevent reading partial writes
+        if (self.lock_file) |*lf| {
+            try lf.lock(.shared);
+        }
+        defer if (self.lock_file) |*lf| lf.unlock();
+
         var file = try std.fs.openFileAbsolute(self.jsonl_path, .{ .mode = .read_only });
         defer file.close();
 
@@ -671,6 +680,13 @@ pub const Store = struct {
 
         try self.beginImmediate();
         errdefer sqlite.exec(self.db, "ROLLBACK;") catch {};
+
+        // Clear tables inside transaction for crash safety
+        if (clear_first) {
+            try sqlite.exec(self.db, "DELETE FROM messages_fts;");
+            try sqlite.exec(self.db, "DELETE FROM messages;");
+            try sqlite.exec(self.db, "DELETE FROM topics;");
+        }
 
         var message_lines: std.ArrayList([]const u8) = .empty;
         defer message_lines.deinit(self.allocator);
@@ -701,10 +717,11 @@ pub const Store = struct {
             self.applyMessageRecord(parsed.value.object) catch continue;
         }
 
-        try self.commit();
-
+        // Update offset inside transaction for crash safety
         const new_offset = offset + @as(u64, @intCast(content.len));
         try self.setMetaInt("jsonl_offset", @as(i64, @intCast(new_offset)));
+
+        try self.commit();
     }
 
     fn applyTopicRecord(self: *Store, obj: std.json.ObjectMap) !void {
@@ -713,7 +730,9 @@ pub const Store = struct {
         const description = if (obj.get("description")) |v| v.string else "";
         const created_at = if (obj.get("created_at")) |v| v.integer else return error.InvalidMessageId;
 
-        const stmt = try sqlite.prepare(self.db, "INSERT OR REPLACE INTO topics (id, name, description, created_at) VALUES (?, ?, ?, ?);");
+        // Use INSERT OR IGNORE to avoid CASCADE DELETE issues with INSERT OR REPLACE.
+        // JSONL is append-only, so existing records don't need updating.
+        const stmt = try sqlite.prepare(self.db, "INSERT OR IGNORE INTO topics (id, name, description, created_at) VALUES (?, ?, ?, ?);");
         defer sqlite.finalize(stmt);
         try sqlite.bindText(stmt, 1, id);
         try sqlite.bindText(stmt, 2, name);
@@ -733,7 +752,9 @@ pub const Store = struct {
         const body = if (obj.get("body")) |v| v.string else "";
         const created_at = if (obj.get("created_at")) |v| v.integer else return error.InvalidMessageId;
 
-        const stmt = try sqlite.prepare(self.db, "INSERT OR REPLACE INTO messages (id, topic_id, parent_id, body, created_at) VALUES (?, ?, ?, ?, ?);");
+        // Use INSERT OR IGNORE to avoid CASCADE DELETE issues with INSERT OR REPLACE.
+        // JSONL is append-only, so existing records don't need updating.
+        const stmt = try sqlite.prepare(self.db, "INSERT OR IGNORE INTO messages (id, topic_id, parent_id, body, created_at) VALUES (?, ?, ?, ?, ?);");
         defer sqlite.finalize(stmt);
         try sqlite.bindText(stmt, 1, id);
         try sqlite.bindText(stmt, 2, topic_id);
@@ -746,13 +767,15 @@ pub const Store = struct {
         try sqlite.bindInt64(stmt, 5, created_at);
         _ = try sqlite.step(stmt);
 
-        // Update FTS
-        const rowid = sqlite.lastInsertRowId(self.db);
-        const fts_stmt = try sqlite.prepare(self.db, "INSERT OR REPLACE INTO messages_fts(rowid, body) VALUES (?, ?);");
-        defer sqlite.finalize(fts_stmt);
-        try sqlite.bindInt64(fts_stmt, 1, rowid);
-        try sqlite.bindText(fts_stmt, 2, body);
-        _ = try sqlite.step(fts_stmt);
+        // Only update FTS if the message was actually inserted (not ignored)
+        if (sqlite.changes(self.db) > 0) {
+            const rowid = sqlite.lastInsertRowId(self.db);
+            const fts_stmt = try sqlite.prepare(self.db, "INSERT INTO messages_fts(rowid, body) VALUES (?, ?);");
+            defer sqlite.finalize(fts_stmt);
+            try sqlite.bindInt64(fts_stmt, 1, rowid);
+            try sqlite.bindText(fts_stmt, 2, body);
+            _ = try sqlite.step(fts_stmt);
+        }
     }
 
     // ========== Transaction Helpers ==========
@@ -765,7 +788,7 @@ pub const Store = struct {
         try self.execWithRetry("COMMIT;");
     }
 
-    fn execWithRetry(self: *Store, sql: []const u8) !void {
+    fn execWithRetry(self: *Store, sql: [:0]const u8) !void {
         var attempt: u32 = 0;
         const max_attempts: u32 = 50;
         var prng = std.Random.DefaultPrng.init(@as(u64, @intCast(std.time.nanoTimestamp())));

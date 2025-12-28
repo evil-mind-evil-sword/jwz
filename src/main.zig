@@ -154,7 +154,7 @@ fn cmdInit(allocator: std.mem.Allocator, stdout: anytype, args: []const []const 
     }
 
     Store.init(allocator, store_dir) catch |err| switch (err) {
-        error.StoreNotFound => {
+        error.StoreAlreadyExists => {
             die("store already exists", .{});
         },
         else => return err,
