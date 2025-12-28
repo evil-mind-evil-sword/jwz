@@ -70,7 +70,15 @@ jwz search "anomalies"
 | `thread <id>` | Show message and all replies |
 | `search <query>` | Full-text search |
 
-### Options
+### Global Options
+
+| Flag | Description |
+|------|-------------|
+| `--store PATH` | Use store at PATH instead of auto-discovery |
+
+You can also set the `ZAWINSKI_STORE` environment variable. The `--store` flag takes precedence.
+
+### Command Options
 
 | Flag | Description |
 |------|-------------|
@@ -138,7 +146,25 @@ lock
 
 ## Store Discovery
 
-`jwz` searches for `.zawinski/` starting from the current directory and walking up the tree (like git finds `.git/`). This means you can run commands from any subdirectory of your project.
+By default, `jwz` searches for `.zawinski/` starting from the current directory and walking up the tree (like git finds `.git/`). This means you can run commands from any subdirectory of your project.
+
+### Custom Store Location
+
+For agents that want to keep their store in a specific location (e.g., `.claude/.zawinski`):
+
+```sh
+# Initialize in a custom location
+jwz --store .claude/.zawinski init
+
+# Use the custom store for all commands
+jwz --store .claude/.zawinski post tasks -m "Hello"
+
+# Or set an environment variable
+export ZAWINSKI_STORE=.claude/.zawinski
+jwz post tasks -m "Hello"
+```
+
+The `--store` flag takes precedence over `ZAWINSKI_STORE`, which takes precedence over auto-discovery.
 
 ## Name
 

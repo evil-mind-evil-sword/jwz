@@ -17,35 +17,57 @@ pub fn main() !void {
     for (args_z) |arg_z| {
         try args_list.append(allocator, arg_z[0..arg_z.len]);
     }
-    const args = try args_list.toOwnedSlice(allocator);
-    defer allocator.free(args);
+    const all_args = try args_list.toOwnedSlice(allocator);
+    defer allocator.free(all_args);
 
     var stdout_buf: [4096]u8 = undefined;
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
     const stdout = &stdout_writer.interface;
     defer stdout.flush() catch {};
 
-    if (args.len < 2) {
+    // Parse global --store flag (before command)
+    var explicit_store: ?[]const u8 = null;
+    var args: std.ArrayListUnmanaged([]const u8) = .empty;
+    defer args.deinit(allocator);
+
+    var i: usize = 0;
+    while (i < all_args.len) {
+        if (std.mem.eql(u8, all_args[i], "--store") and i + 1 < all_args.len) {
+            explicit_store = all_args[i + 1];
+            i += 2;
+        } else {
+            try args.append(allocator, all_args[i]);
+            i += 1;
+        }
+    }
+
+    // Fall back to ZAWINSKI_STORE env var
+    if (explicit_store == null) {
+        explicit_store = std.posix.getenv("ZAWINSKI_STORE");
+    }
+
+    if (args.items.len < 2) {
         try printUsage(stdout);
         try stdout.flush();
         return;
     }
 
-    const cmd = args[1];
+    const cmd = args.items[1];
 
     // Handle init before store discovery
     if (std.mem.eql(u8, cmd, "init")) {
-        cmdInit(allocator, stdout, args[2..]) catch |err| {
+        cmdInit(allocator, stdout, args.items[2..], explicit_store) catch |err| {
             dieOnError(err);
         };
         try stdout.flush();
         return;
     }
 
-    // Discover and open store
-    const store_dir = zawinski.store.discoverStoreDir(allocator) catch |err| {
-        dieOnError(err);
-    };
+    // Discover or use explicit store path
+    const store_dir = if (explicit_store) |sp|
+        resolveStorePath(allocator, sp) catch |err| dieOnError(err)
+    else
+        zawinski.store.discoverStoreDir(allocator) catch |err| dieOnError(err);
     defer allocator.free(store_dir);
 
     var store = Store.open(allocator, store_dir) catch |err| {
@@ -59,19 +81,19 @@ pub fn main() !void {
 
     const result: anyerror!void = blk: {
         if (std.mem.eql(u8, cmd, "topic")) {
-            break :blk cmdTopic(allocator, stdout, &store, args[2..]);
+            break :blk cmdTopic(allocator, stdout, &store, args.items[2..]);
         } else if (std.mem.eql(u8, cmd, "post")) {
-            break :blk cmdPost(allocator, stdout, &store, args[2..]);
+            break :blk cmdPost(allocator, stdout, &store, args.items[2..]);
         } else if (std.mem.eql(u8, cmd, "reply")) {
-            break :blk cmdReply(allocator, stdout, &store, args[2..]);
+            break :blk cmdReply(allocator, stdout, &store, args.items[2..]);
         } else if (std.mem.eql(u8, cmd, "read")) {
-            break :blk cmdRead(allocator, stdout, &store, args[2..]);
+            break :blk cmdRead(allocator, stdout, &store, args.items[2..]);
         } else if (std.mem.eql(u8, cmd, "show")) {
-            break :blk cmdShow(allocator, stdout, &store, args[2..]);
+            break :blk cmdShow(allocator, stdout, &store, args.items[2..]);
         } else if (std.mem.eql(u8, cmd, "thread")) {
-            break :blk cmdThread(allocator, stdout, &store, args[2..]);
+            break :blk cmdThread(allocator, stdout, &store, args.items[2..]);
         } else if (std.mem.eql(u8, cmd, "search")) {
-            break :blk cmdSearch(allocator, stdout, &store, args[2..]);
+            break :blk cmdSearch(allocator, stdout, &store, args.items[2..]);
         } else {
             die("unknown command: {s}", .{cmd});
         }
@@ -84,7 +106,7 @@ pub fn main() !void {
 
 fn printUsage(stdout: anytype) !void {
     try stdout.writeAll(
-        \\Usage: zawinski <command> [options]
+        \\Usage: jwz [--store PATH] <command> [options]
         \\
         \\Commands:
         \\  init                    Initialize a new store
@@ -97,14 +119,17 @@ fn printUsage(stdout: anytype) !void {
         \\  thread <id>             Show a message and all replies
         \\  search <query>          Search messages
         \\
-        \\Options:
+        \\Global Options:
+        \\  --store PATH            Use store at PATH (or set ZAWINSKI_STORE)
+        \\
+        \\Command Options:
         \\  --json                  Output as JSON
         \\  --quiet                 Output only ID
         \\
     );
 }
 
-fn cmdInit(allocator: std.mem.Allocator, stdout: anytype, args: []const []const u8) !void {
+fn cmdInit(allocator: std.mem.Allocator, stdout: anytype, args: []const []const u8, explicit_store: ?[]const u8) !void {
     var json = false;
     var i: usize = 0;
     while (i < args.len) {
@@ -115,10 +140,23 @@ fn cmdInit(allocator: std.mem.Allocator, stdout: anytype, args: []const []const 
         i += 1;
     }
 
-    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const cwd = try std.fs.cwd().realpath(".", &cwd_buf);
-    const store_dir = try std.fs.path.join(allocator, &.{ cwd, ".zawinski" });
+    // Determine store directory
+    const store_dir = if (explicit_store) |sp|
+        try resolveStorePath(allocator, sp)
+    else blk: {
+        var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const cwd = try std.fs.cwd().realpath(".", &cwd_buf);
+        break :blk try std.fs.path.join(allocator, &.{ cwd, ".zawinski" });
+    };
     defer allocator.free(store_dir);
+
+    // Create parent directories if needed
+    if (std.fs.path.dirname(store_dir)) |parent| {
+        std.fs.makeDirAbsolute(parent) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+    }
 
     Store.init(allocator, store_dir) catch |err| switch (err) {
         error.StoreNotFound => {
@@ -135,13 +173,13 @@ fn cmdInit(allocator: std.mem.Allocator, stdout: anytype, args: []const []const 
         try std.json.Stringify.value(record, .{ .whitespace = .minified }, stdout);
         try stdout.writeByte('\n');
     } else {
-        try stdout.print("Initialized zawinski store in {s}\n", .{store_dir});
+        try stdout.print("Initialized store in {s}\n", .{store_dir});
     }
 }
 
 fn cmdTopic(allocator: std.mem.Allocator, stdout: anytype, store: *Store, args: []const []const u8) !void {
     if (args.len < 1) {
-        die("usage: zawinski topic <new|list> [options]", .{});
+        die("usage: jwz topic <new|list> [options]", .{});
     }
 
     const subcmd = args[0];
@@ -181,7 +219,7 @@ fn cmdTopicNew(allocator: std.mem.Allocator, stdout: anytype, store: *Store, arg
     }
 
     if (name == null) {
-        die("usage: zawinski topic new <name> [-d description] [--json|--quiet]", .{});
+        die("usage: jwz topic new <name> [-d description] [--json|--quiet]", .{});
     }
 
     const id = try store.createTopic(name.?, description);
@@ -272,7 +310,7 @@ fn cmdPost(allocator: std.mem.Allocator, stdout: anytype, store: *Store, args: [
     }
 
     if (topic_name == null or body == null) {
-        die("usage: zawinski post <topic> -m <message> [--json|--quiet]", .{});
+        die("usage: jwz post <topic> -m <message> [--json|--quiet]", .{});
     }
 
     const processed_body = processEscapes(allocator, body.?) catch body.?;
@@ -318,7 +356,7 @@ fn cmdReply(allocator: std.mem.Allocator, stdout: anytype, store: *Store, args: 
     }
 
     if (parent_id == null or body == null) {
-        die("usage: zawinski reply <message-id> -m <message> [--json|--quiet]", .{});
+        die("usage: jwz reply <message-id> -m <message> [--json|--quiet]", .{});
     }
 
     // Fetch parent to get topic
@@ -376,7 +414,7 @@ fn cmdRead(allocator: std.mem.Allocator, stdout: anytype, store: *Store, args: [
     }
 
     if (topic_name == null) {
-        die("usage: zawinski read <topic> [--limit N] [--json]", .{});
+        die("usage: jwz read <topic> [--limit N] [--json]", .{});
     }
 
     const topic = try store.fetchTopic(topic_name.?);
@@ -438,7 +476,7 @@ fn cmdShow(allocator: std.mem.Allocator, stdout: anytype, store: *Store, args: [
     }
 
     if (message_id == null) {
-        die("usage: zawinski show <message-id> [--json]", .{});
+        die("usage: jwz show <message-id> [--json]", .{});
     }
 
     const msg = try store.fetchMessage(message_id.?);
@@ -479,7 +517,7 @@ fn cmdThread(allocator: std.mem.Allocator, stdout: anytype, store: *Store, args:
     }
 
     if (message_id == null) {
-        die("usage: zawinski thread <message-id> [--json]", .{});
+        die("usage: jwz thread <message-id> [--json]", .{});
     }
 
     const messages = try store.fetchThread(message_id.?);
@@ -565,7 +603,7 @@ fn cmdSearch(allocator: std.mem.Allocator, stdout: anytype, store: *Store, args:
     }
 
     if (query == null) {
-        die("usage: zawinski search <query> [--topic t] [--limit N] [--json]", .{});
+        die("usage: jwz search <query> [--topic t] [--limit N] [--json]", .{});
     }
 
     const messages = try store.searchMessages(query.?, topic_name, limit);
@@ -702,6 +740,17 @@ fn processEscapes(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     return output.toOwnedSlice(allocator);
 }
 
+fn resolveStorePath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    // If absolute, use as-is
+    if (std.fs.path.isAbsolute(path)) {
+        return allocator.dupe(u8, path);
+    }
+    // Otherwise, resolve relative to cwd
+    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const cwd = try std.fs.cwd().realpath(".", &cwd_buf);
+    return std.fs.path.join(allocator, &.{ cwd, path });
+}
+
 fn nextValue(args: []const []const u8, index: *usize, name: []const u8) []const u8 {
     const i = index.*;
     if (i + 1 >= args.len) {
@@ -718,7 +767,7 @@ fn die(comptime fmt: []const u8, args: anytype) noreturn {
 
 fn dieOnError(err: anyerror) noreturn {
     const msg: []const u8 = switch (err) {
-        StoreError.StoreNotFound => "No zawinski store found. Run 'zawinski init' first.",
+        StoreError.StoreNotFound => "No store found. Run 'jwz init' or use --store.",
         StoreError.TopicNotFound => "Topic not found.",
         StoreError.TopicExists => "Topic already exists.",
         StoreError.MessageNotFound => "Message not found.",
