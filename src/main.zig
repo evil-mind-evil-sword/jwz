@@ -54,7 +54,7 @@ pub fn main() !void {
 
     // Handle version before anything else
     if (std.mem.eql(u8, cmd, "version") or std.mem.eql(u8, cmd, "--version") or std.mem.eql(u8, cmd, "-V")) {
-        try stdout.writeAll("jwz 0.4.1\n");
+        try stdout.writeAll("jwz 0.4.2\n");
         try stdout.flush();
         return;
     }
