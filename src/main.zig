@@ -54,7 +54,7 @@ pub fn main() !void {
 
     // Handle version before anything else
     if (std.mem.eql(u8, cmd, "version") or std.mem.eql(u8, cmd, "--version") or std.mem.eql(u8, cmd, "-V")) {
-        try stdout.writeAll("jwz 0.5.1\n");
+        try stdout.writeAll("jwz 0.5.2\n");
         try stdout.flush();
         return;
     }
@@ -346,6 +346,10 @@ fn cmdPost(allocator: std.mem.Allocator, stdout: anytype, store: *Store, args: [
 
     // Auto-create topic if --create flag is set
     if (create_topic) {
+        // Reject UUID-like topic names to prevent agents from accidentally creating garbage topics
+        if (looksLikeUuid(topic_name.?)) {
+            die("Invalid topic name: '{s}' looks like a UUID.\n\nTopic names should be descriptive (e.g., 'tasks', 'research:myproject').\nUse 'jwz topic list' to see existing topics.", .{topic_name.?});
+        }
         if (store.createTopic(topic_name.?, "")) |topic_id| {
             allocator.free(topic_id);
         } else |err| switch (err) {
@@ -1077,6 +1081,25 @@ fn nextValue(args: []const []const u8, index: *usize, name: []const u8) []const 
     }
     index.* = i + 2;
     return args[i + 1];
+}
+
+/// Detect UUID-like strings (8-4-4-4-12 hex format)
+/// Returns true for patterns like "f239baf9-e91e-471b-b150-ef77ec071fd6"
+fn looksLikeUuid(s: []const u8) bool {
+    // UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (36 chars)
+    if (s.len != 36) return false;
+
+    // Check hyphens at positions 8, 13, 18, 23
+    if (s[8] != '-' or s[13] != '-' or s[18] != '-' or s[23] != '-') return false;
+
+    // Check all other chars are hex
+    for (s, 0..) |c, i| {
+        if (i == 8 or i == 13 or i == 18 or i == 23) continue;
+        const is_hex = (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F');
+        if (!is_hex) return false;
+    }
+
+    return true;
 }
 
 fn die(comptime fmt: []const u8, args: anytype) noreturn {
