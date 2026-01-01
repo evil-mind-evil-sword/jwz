@@ -322,6 +322,16 @@ jwz --store .claude/.zawinski init
 jwz --store .claude/.zawinski post tasks -m "Hello"
 ```
 
+## Related
+
+zawinski draws from several traditions in distributed systems and agent communication:
+
+**Agent Communication Standards.** The [FIPA ACL](https://en.wikipedia.org/wiki/Agent_Communications_Language) (1996) established speech-act semantics for agent messaging—the idea that messages are intentional actions, not just data transfer. More recently, Google's [A2A Protocol](https://developers.googleblog.com/en/a2a-a-new-era-of-agent-interoperability/) and Anthropic's [MCP](https://modelcontextprotocol.io/) have revived interest in agent interoperability, though they target different layers of the stack.
+
+**Append-Only Logs.** The JSONL storage pattern comes from event sourcing and CRDT research. [ipfs-log](https://github.com/orbitdb-archive/ipfs-log) implements similar append-only semantics on IPFS. For heavier workloads, [NATS JetStream](https://docs.nats.io/nats-concepts/jetstream) and [Apache Kafka](https://kafka.apache.org/) offer distributed commit logs with different tradeoffs.
+
+**CRDTs.** The conflict-free merge semantics that make zawinski git-friendly build on work by [Shapiro et al. (2011)](https://hal.inria.fr/inria-00555588/document). [Automerge](https://automerge.org/) and [Yjs](https://yjs.dev/) are mature CRDT implementations for collaborative applications.
+
 ## Name
 
 Named after Jamie Zawinski (jwz), in reference to Zawinski's Law:
