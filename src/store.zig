@@ -395,9 +395,11 @@ pub const Store = struct {
     }
 
     pub fn fetchTopic(self: *Store, name: []const u8) !Topic {
+        // Trim to match createTopic behavior
+        const trimmed_name = std.mem.trim(u8, name, " \t\r\n");
         const stmt = try sqlite.prepare(self.db, "SELECT id, name, description, created_at FROM topics WHERE name = ?;");
         defer sqlite.finalize(stmt);
-        try sqlite.bindText(stmt, 1, name);
+        try sqlite.bindText(stmt, 1, trimmed_name);
 
         if (try sqlite.step(stmt)) {
             return Topic{
