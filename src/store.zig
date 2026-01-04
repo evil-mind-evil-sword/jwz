@@ -987,17 +987,20 @@ pub const Store = struct {
     }
 
     fn importFromOffset(self: *Store, offset: u64, clear_first: bool) !void {
-        // Acquire lock before reading to prevent reading partial writes
-        if (self.lock_file) |*lf| {
-            try lf.lock(.shared);
-        }
-        defer if (self.lock_file) |*lf| lf.unlock();
+        // Read JSONL content under lock, then release before acquiring SQLite lock.
+        // This avoids deadlock with write path (which holds SQLite -> acquires JSONL).
+        const content = blk: {
+            if (self.lock_file) |*lf| {
+                try lf.lock(.shared);
+            }
+            defer if (self.lock_file) |*lf| lf.unlock();
 
-        var file = try std.fs.openFileAbsolute(self.jsonl_path, .{ .mode = .read_only });
-        defer file.close();
+            var file = try std.fs.openFileAbsolute(self.jsonl_path, .{ .mode = .read_only });
+            defer file.close();
 
-        try file.seekTo(offset);
-        const content = try file.readToEndAlloc(self.allocator, 100 * 1024 * 1024);
+            try file.seekTo(offset);
+            break :blk try file.readToEndAlloc(self.allocator, 100 * 1024 * 1024);
+        };
         defer self.allocator.free(content);
 
         try self.beginImmediate();
