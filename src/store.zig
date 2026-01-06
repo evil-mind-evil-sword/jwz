@@ -1245,7 +1245,29 @@ pub const Store = struct {
     }
 };
 
+/// Discovers the store directory.
+///
+/// Priority:
+/// 1. JWZ_STORE environment variable
+/// 2. Walk up directory tree looking for .jwz or .zawinski
+///
+/// Returns an allocated path; caller must free.
 pub fn discoverStoreDir(allocator: std.mem.Allocator) ![]const u8 {
+    // Check JWZ_STORE environment variable first
+    if (std.process.getEnvVarOwned(allocator, "JWZ_STORE")) |env| {
+        defer allocator.free(env);
+        if (std.fs.path.isAbsolute(env)) {
+            return allocator.dupe(u8, env);
+        }
+        var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const cwd_path = try std.fs.cwd().realpath(".", &cwd_buf);
+        return std.fs.path.join(allocator, &.{ cwd_path, env });
+    } else |err| switch (err) {
+        error.EnvironmentVariableNotFound => {},
+        else => return err,
+    }
+
+    // Walk up directory tree
     var cwd = std.fs.cwd();
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const cwd_path = try cwd.realpath(".", &path_buf);

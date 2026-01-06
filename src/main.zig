@@ -155,6 +155,8 @@ fn printUsage(stdout: anytype) !void {
         \\Global Options:
         \\  --store PATH            Use store at PATH instead of auto-discovery
         \\
+        \\Store discovery: --store flag > JWZ_STORE env > walk up for .jwz/.zawinski
+        \\
         \\Read/Thread Options:
         \\  -s, --summary           Show first line of body only (truncated to 80 chars)
         \\
