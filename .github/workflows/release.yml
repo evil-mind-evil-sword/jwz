@@ -165,12 +165,13 @@ jobs:
           cp release/* "site/releases/zawinski/${VERSION}/"
           cp release/install.sh "site/releases/zawinski/install.sh"
 
-          # Update manifest
+          # Update manifest with version and binary sizes
           cd site/releases
+          SIZES=$(cd ../zawinski/${VERSION} && for f in jwz-*; do echo "\"$f\": $(stat -c%s "$f" 2>/dev/null || stat -f%z "$f")"; done | paste -sd, -)
           if [ -f manifest.json ]; then
-            jq --arg v "$VERSION" '.zawinski = $v' manifest.json > manifest.tmp && mv manifest.tmp manifest.json
+            jq --arg v "$VERSION" --argjson sizes "{$SIZES}" '.zawinski = {version: $v, sizes: $sizes}' manifest.json > manifest.tmp && mv manifest.tmp manifest.json
           else
-            echo "{\"zawinski\": \"$VERSION\"}" > manifest.json
+            echo "{\"zawinski\": {\"version\": \"$VERSION\", \"sizes\": {$SIZES}}}" > manifest.json
           fi
 
       - name: Commit and push to site
