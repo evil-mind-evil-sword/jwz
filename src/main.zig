@@ -1,5 +1,6 @@
 const std = @import("std");
 const jwz = @import("jwz");
+const build_options = @import("build_options");
 
 const Store = jwz.store.Store;
 const StoreError = jwz.store.StoreError;
@@ -54,7 +55,7 @@ pub fn main() !void {
 
     // Handle version before anything else
     if (std.mem.eql(u8, cmd, "version") or std.mem.eql(u8, cmd, "--version") or std.mem.eql(u8, cmd, "-V")) {
-        try stdout.writeAll("jwz 0.6.2\n");
+        try stdout.print("jwz {s}\n", .{build_options.version});
         try stdout.flush();
         return;
     }

@@ -32,6 +32,11 @@ pub fn build(b: *std.Build) void {
     });
     sqlite.linkLibC();
 
+    // Build options (version from build.zig.zon)
+    const options = b.addOptions();
+    const zon = @import("build.zig.zon");
+    options.addOption([]const u8, "version", zon.version);
+
     // Executable
     const exe = b.addExecutable(.{
         .name = "jwz",
@@ -41,6 +46,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "jwz", .module = mod },
+                .{ .name = "build_options", .module = options.createModule() },
             },
         }),
     });
