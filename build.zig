@@ -4,6 +4,12 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Dependencies
+    const termcat = b.dependency("termcat", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Library module
     const mod = b.addModule("jwz", .{
         .root_source_file = b.path("src/root.zig"),
@@ -47,6 +53,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "jwz", .module = mod },
                 .{ .name = "build_options", .module = options.createModule() },
+                .{ .name = "termcat", .module = termcat.module("termcat") },
             },
         }),
     });

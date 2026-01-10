@@ -4,7 +4,12 @@
     .fingerprint = 0x6aafe0f7b5d8b58a,
     .minimum_zig_version = "0.15.2",
 
-    .dependencies = .{},
+    .dependencies = .{
+        .termcat = .{
+            .url = "https://github.com/evil-mind-evil-sword/termcat/archive/refs/heads/main.tar.gz",
+            .hash = "termcat-26.1.7-vKTWkiZ4FgAOQwZpZTnKsRLGcn92YsvRxcmKBpfo6IUp",
+        },
+    },
 
     .paths = .{
         "build.zig",

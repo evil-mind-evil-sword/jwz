@@ -1,6 +1,8 @@
 const std = @import("std");
 const jwz = @import("jwz");
 const build_options = @import("build_options");
+const termcat = @import("termcat");
+const cli = termcat.cli;
 
 const Store = jwz.store.Store;
 const StoreError = jwz.store.StoreError;
@@ -1498,12 +1500,7 @@ fn resolveStorePath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 
 }
 
 fn nextValue(args: []const []const u8, index: *usize, name: []const u8) []const u8 {
-    const i = index.*;
-    if (i + 1 >= args.len) {
-        die("missing value for {s}", .{name});
-    }
-    index.* = i + 2;
-    return args[i + 1];
+    return cli.nextValue(args, index) orelse die("missing value for {s}", .{name});
 }
 
 /// Detect UUID-like strings (8-4-4-4-12 hex format)
@@ -1525,10 +1522,7 @@ fn looksLikeUuid(s: []const u8) bool {
     return true;
 }
 
-fn die(comptime fmt: []const u8, args: anytype) noreturn {
-    std.debug.print(fmt ++ "\n", args);
-    std.process.exit(1);
-}
+const die = cli.die;
 
 fn dieOnError(err: anyerror) noreturn {
     const msg: []const u8 = switch (err) {
